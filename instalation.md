@@ -12,7 +12,7 @@
 
 To set up a config file with the demo profile: create a file called _demo-profile.yaml_ with the following contents:
 
-```
+```yaml
 apiVersion: install.istio.io/v1alpha1
 kind: IstioOperator
 metadata:
