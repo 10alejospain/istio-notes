@@ -1,6 +1,8 @@
 # SPIRE 
 
-<img src="" alt="" width="100" height="auto">
+<div align="center">
+<img src="https://github.com/10alejospain/istio-notes/blob/main/images/spire-and-cert-manager.svg" alt="image by tetrate.io" width="auto" height="300">
+</div>
 
 ## Installation quickstart guide example
 
@@ -11,7 +13,7 @@ cd istio-1.16.*/
 
 kubectl apply -f samples/security/spire/spire-quickstart.yaml
 ```
- - To check if the istio injection is enabled in the default namespace and spire namespace is created run
+To check if the istio injection is enabled in the default namespace and spire namespace is created run
 
 `kubectl get namespace -L istio-injection
 `
@@ -110,3 +112,69 @@ After registering an entry for the Ingress-gateway pod, Envoy receives the ident
 
 3. Deploying an example 
 
+For the first example we can use the preconfigured _sleep-spire_ file provided by Istio
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sleep
+spec:
+  replicas: 1
+  selector:
+      matchLabels:
+        app: sleep
+  template:
+      metadata:
+        labels:
+          app: sleep
+        # Injects custom sidecar template
+        annotations:
+            inject.istio.io/templates: "sidecar,spire"
+      spec:
+        terminationGracePeriodSeconds: 0
+        serviceAccountName: sleep
+        containers:
+        - name: sleep
+          image: curlimages/curl
+          command: ["/bin/sleep", "3650d"]
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            runAsUser: 1000
+        volumes:
+          - name: tmp
+            emptyDir: {}
+          # CSI volume
+          - name: workload-socket
+            csi:
+              driver: "csi.spiffe.io"
+              readOnly: true
+```
+Then we run the commands to set de variables to get the pod's name and id
+
+```shell
+SLEEP_POD=$(kubectl get pod -l app=sleep -o jsonpath="{.items[0].metadata.name}")
+SLEEP_POD_UID=$(kubectl get pods $SLEEP_POD -o jsonpath='{.metadata.uid}')
+```
+
+And register the workload in the spire server where we asing to the pod the _spiffe://example.org<...>_ url that was created by the quickstart spire file
+
+```shell
+kubectl exec -n spire spire-server-0 -- \
+/opt/spire/bin/spire-server entry create \
+    -spiffeID spiffe://example.org/ns/default/sa/sleep \
+    -parentID spiffe://example.org/ns/spire/sa/spire-agent \
+    -selector k8s:ns:default \
+    -selector k8s:pod-uid:$SLEEP_POD_UID \
+    -dns $SLEEP_POD \
+    -socketPath /run/spire/sockets/server.sock
+```
+We can check that the workload waas issued by SPIRE by running 
+
+```shell
+istioctl proxy-config secret $SLEEP_POD -o json | jq -r \
+'.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | base64 --decode |  echo -
+```
