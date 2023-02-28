@@ -13,10 +13,89 @@ cd istio-1.16.*/
 
 kubectl apply -f samples/security/spire/spire-quickstart.yaml
 ```
+
+After seting the spire server deployed in the previous step with the quickstart run the following command 
+
+```shell
+istioctl install --skip-confirmation -f - <<EOF
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+spec:
+  profile: default
+  meshConfig:
+    trustDomain: example.org
+  values:
+    global:
+    # This is used to customize the sidecar template
+    sidecarInjectorWebhook:
+      templates:
+        spire: |
+          spec:
+            containers:
+            - name: istio-proxy
+              volumeMounts:
+              - name: workload-socket
+                mountPath: /run/secrets/workload-spiffe-uds
+                readOnly: true
+            volumes:
+              - name: workload-socket
+                csi:
+                  driver: "csi.spiffe.io"
+  components:
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        label:
+          istio: ingressgateway
+        k8s:
+          overlays:
+            - apiVersion: apps/v1
+              kind: Deployment
+              name: istio-ingressgateway
+              patches:
+                - path: spec.template.spec.volumes.[name:workload-socket]
+                  value:
+                    name: workload-socket
+                    csi:
+                      driver: "csi.spiffe.io"
+                - path: spec.template.spec.containers.[name:istio-proxy].volumeMounts.[name:workload-socket]
+                  value:
+                    name: workload-socket
+                    mountPath: "/run/secrets/workload-spiffe-uds"
+                    readOnly: true
+                - path: spec.template.spec.initContainers
+                  value:
+                    - name: wait-for-spire-socket
+                      image: busybox:1.28
+                      volumeMounts:
+                        - name: workload-socket
+                          mountPath: /run/secrets/workload-spiffe-uds
+                          readOnly: true
+                      env:
+                        - name: CHECK_FILE
+                          value: /run/secrets/workload-spiffe-uds/socket
+                      command:
+                        - sh
+                        - "-c"
+                        - |-
+                          echo `date -Iseconds` Waiting for: ${CHECK_FILE}
+                          while [[ ! -e ${CHECK_FILE} ]] ; do
+                            echo `date -Iseconds` File does not exist: ${CHECK_FILE}
+                            sleep 15
+                          done
+                          ls -l ${CHECK_FILE}
+EOF
+```
+
 To check if the istio injection is enabled in the default namespace and spire namespace is created run
 
-`kubectl get namespace -L istio-injection
-`
+```shell 
+kubectl get pods -n istio-system
+
+kubectl get namespace -L istio-injection
+```
 
 The output should look like:
 
