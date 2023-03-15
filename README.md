@@ -1,4 +1,4 @@
-# istio-notes
+# Istio notes
 To keep track of  commands and other useful stuff
 
 ## Links to the files
